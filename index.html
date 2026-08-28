@@ -20,7 +20,7 @@ input,select,button{font:inherit;padding:10px 12px;border-radius:8px;border:1px 
 .tablewrap{overflow:auto;margin-top:12px;border-top:1px solid #cdbd9f}table{border-collapse:collapse;width:100%;min-width:930px;font-size:13px}th,td{padding:10px 7px;border-bottom:1px solid #ded2bd;text-align:right}th{font-size:11px;text-transform:uppercase}th:first-child,td:first-child{text-align:left}.rank{font-size:18px;font-weight:800;color:var(--orange)}.value{color:var(--green);font-weight:900}.pill{display:inline-block;padding:3px 7px;border-radius:5px;background:#1266a0;color:white;font-weight:800}.pill.D{background:#16703c}.pill.G{background:#b88b1c}.pill.LW{background:#187b8d}.pill.RW{background:#754192}.disabled{opacity:.4}
 .side{display:flex;flex-direction:column;gap:16px}.rostergrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.slot{border:1px solid #d1c1a4;border-radius:9px;padding:9px;min-height:75px}.slot b{color:#167194}.small{font-size:12px;color:var(--muted)}.recommend{font-size:21px;font-weight:850;margin-bottom:6px}.footerbar{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;padding:18px;background:linear-gradient(#ecd6aa,#dfc08b);border-top:1px solid #c5a979}.status{width:100%;text-align:center;font-size:12px;color:#6e604c}.viewpane{min-height:420px}
 @media(max-width:980px){.content{grid-template-columns:1fr}.side{grid-row:1}.hero{min-height:250px}.sun,.puck{display:none}.brand{flex-direction:column}.slotcard{align-self:flex-end}.rules{width:100%;margin:0}.rostergrid{grid-template-columns:repeat(5,1fr)}}@media(max-width:650px){.rostergrid{grid-template-columns:1fr 1fr}.content{padding:10px}.hero{padding:20px 16px}.tag{margin-left:10px}}
-</style>
+</style><style>@media(max-width:650px){#view-board .card>div[style*="grid-template-columns"]{grid-template-columns:1fr!important}}</style>
 </head>
 <body>
 <header class="hero"><div class="sun"></div><div class="puck"></div><div class="brand">
@@ -56,9 +56,25 @@ input,select,button{font:inherit;padding:10px 12px;border-radius:8px;border:1px 
 <div id="view-board" class="viewpane" style="display:none;padding:18px">
   <div class="card">
     <h3>▦ Draft Board</h3>
-    <div class="small" style="margin-bottom:10px">All selections in draft order. “Me” marks your picks.</div>
-    <div class="tablewrap"><table style="min-width:700px">
-      <thead><tr><th>Overall</th><th>Round</th><th>Team Slot</th><th>Player</th><th>Pos</th><th>Owner</th></tr></thead>
+    <div class="small" style="margin-bottom:12px">Fast-entry mode for live drafting. Search a player, choose who drafted him, then add the pick.</div>
+
+    <div style="display:grid;grid-template-columns:2fr 1fr auto;gap:8px;align-items:end;margin-bottom:12px">
+      <div>
+        <label class="small">Player</label>
+        <input id="boardsearch" list="playerlist" placeholder="Start typing a player name…" style="width:100%">
+        <datalist id="playerlist"></datalist>
+      </div>
+      <div>
+        <label class="small">Drafted by</label>
+        <select id="boardowner" style="width:100%"></select>
+      </div>
+      <button id="boardadd">Add Pick</button>
+    </div>
+
+    <div id="onclock" class="small" style="padding:10px;border:1px solid #ded2bd;border-radius:10px;margin-bottom:12px"></div>
+
+    <div class="tablewrap"><table style="min-width:760px">
+      <thead><tr><th>Overall</th><th>Round</th><th>Team</th><th>Player</th><th>Pos</th><th>Owner</th><th></th></tr></thead>
       <tbody id="boardrows"></tbody>
     </table></div>
   </div>
@@ -143,16 +159,63 @@ function ownerAtPick(k){
  let round=Math.floor((k-1)/12)+1, pos=(k-1)%12+1;
  return round%2?pos:13-pos;
 }
+
+function nextOverallPick(){ return history.length+1; }
+function draftOwnerLabel(teamSlot){
+ let mySlot=Number($("slot").value||1);
+ return teamSlot===mySlot ? "Me" : `Team ${teamSlot}`;
+}
+function fillBoardOwner(){
+ let sel=$("boardowner"); if(!sel) return;
+ let next=nextOverallPick(), team=ownerAtPick(next), mySlot=Number($("slot").value||1);
+ sel.innerHTML=Array.from({length:12},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===team?"selected":""}>${n===mySlot?"Me":`Team ${n}`}</option>`).join("");
+}
+function fillPlayerList(){
+ let dl=$("playerlist"); if(!dl) return;
+ let taken=new Set(history);
+ dl.innerHTML=players.filter(p=>!taken.has(p.id)).map(p=>`<option value="${p.name}">${p.team||""} · ${p.positions.join("/")}</option>`).join("");
+}
+function findPlayerByBoardInput(){
+ let q=($("boardsearch")?.value||"").trim().toLowerCase();
+ if(!q) return null;
+ return players.find(p=>p.name.toLowerCase()===q) ||
+        players.find(p=>p.name.toLowerCase().startsWith(q)) ||
+        players.find(p=>p.name.toLowerCase().includes(q));
+}
+function addBoardPick(){
+ let p=findPlayerByBoardInput();
+ if(!p){ alert("Choose a player from the list."); return; }
+ if(drafted.has(p.id)){ alert("That player has already been drafted."); return; }
+ let team=Number($("boardowner").value);
+ let mySlot=Number($("slot").value||1);
+ drafted.set(p.id, team===mySlot?"me":`team${team}`);
+ history.push(p.id);
+ $("boardsearch").value="";
+ render();
+ showView("board");
+}
+function undoPickAt(index){
+ if(index<0||index>=history.length) return;
+ let id=history[index];
+ history.splice(index,1);
+ drafted.delete(id);
+ render();
+ showView("board");
+}
 function renderSecondaryViews(){
  let a=assignment(), m=mine();
 
  // Draft board
  let rows=history.map((id,idx)=>{
-   let p=players.find(x=>x.id==id), overall=idx+1, round=Math.floor(idx/12)+1, team=ownerAtPick(overall);
-   let owner=drafted.get(id)==="me"?"Me":`Team ${team}`;
-   return `<tr><td>${overall}</td><td>${round}</td><td>${team}</td><td><b>${p?.name||"Unknown"}</b></td><td>${p?.positions?.join("/")||""}</td><td>${owner}</td></tr>`;
+   let p=players.find(x=>x.id==id), overall=idx+1, round=Math.floor(idx/12)+1, expectedTeam=ownerAtPick(overall);
+   let raw=drafted.get(id), owner=raw==="me"?"Me":(raw&&raw.startsWith("team")?`Team ${raw.slice(4)}`:`Team ${expectedTeam}`);
+   return `<tr><td>${overall}</td><td>${round}</td><td>${expectedTeam}</td><td><b>${p?.name||"Unknown"}</b></td><td>${p?.positions?.join("/")||""}</td><td>${owner}</td><td><button onclick="undoPickAt(${idx})" style="padding:4px 7px">Undo</button></td></tr>`;
  }).join("");
- $("boardrows").innerHTML=rows||`<tr><td colspan="6" style="text-align:left">No picks recorded yet.</td></tr>`;
+ $("boardrows").innerHTML=rows||`<tr><td colspan="7" style="text-align:left">No picks recorded yet.</td></tr>`;
+
+ fillPlayerList(); fillBoardOwner();
+ let n=nextOverallPick(), tm=ownerAtPick(n), rd=Math.floor((n-1)/12)+1;
+ $("onclock").innerHTML=`<b>On the clock:</b> Round ${rd} · Overall ${n} · ${draftOwnerLabel(tm)}`;
 
  // Full roster
  let rosterHtml=POS.map(pos=>{
@@ -165,7 +228,7 @@ function renderSecondaryViews(){
  // Draft log, newest first
  $("draftlog").innerHTML=history.length ? history.map((id,idx)=>{
    let p=players.find(x=>x.id==id), overall=idx+1, round=Math.floor(idx/12)+1;
-   return `<div style="padding:8px 0;border-bottom:1px solid #ded2bd">#${overall} · R${round} · ${drafted.get(id)==="me"?"<b>MY PICK</b>":`Team ${ownerAtPick(overall)}`} — <b>${p?.name||"Unknown"}</b> <span>${p?.positions?.join("/")||""}</span></div>`;
+   let raw=drafted.get(id), who=raw==="me"?"<b>MY PICK</b>":(raw&&raw.startsWith("team")?`Team ${raw.slice(4)}`:`Team ${ownerAtPick(overall)}`); return `<div style="padding:8px 0;border-bottom:1px solid #ded2bd">#${overall} · R${round} · ${who} — <b>${p?.name||"Unknown"}</b> <span>${p?.positions?.join("/")||""}</span></div>`;
  }).reverse().join("") : "No picks recorded yet.";
 }
 function showView(name){
@@ -201,5 +264,7 @@ function render(){
 function take(id,owner){let p=players.find(x=>x.id==id);if(!p||drafted.has(id)||(owner=="me"&&!legal(p)))return;drafted.set(id,owner);history.push(id);render()}
 $("undo").onclick=()=>{let x=history.pop();if(x){drafted.delete(x);render()}};$("reset").onclick=()=>{drafted.clear();history=[];render()};$("search").oninput=render;$("filter").onchange=render;$("slot").onchange=render;$("riskpref").onchange=render;
 document.querySelectorAll("nav [data-view]").forEach(b=>b.onclick=()=>showView(b.dataset.view));
+$("boardadd").onclick=addBoardPick;
+$("boardsearch").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();addBoardPick();}});
 render();showView("best");
 </script></body></html>
